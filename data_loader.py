@@ -1,10 +1,11 @@
 """Роль 1 (Маша): завантаження та перевірка даних з CSV.
 
 Джерела даних у папці data/:
-- protocol.csv — основний набір: 5 сценаріїв за протоколами МОЗ
+- protocol.csv — (необов'язковий) 5 сценаріїв за протоколами МОЗ
   (scenario_name, step_number, action_text, is_correct, explanation);
 - choking.csv — сценарій «Людина вдавилася» у форматі «один крок = один рядок»;
-- topics_*.csv, questions_*.csv, scenarios_*.csv — теми, заповнені вручну.
+- topics*.csv, questions*.csv, scenarios*.csv — теми, заповнені вручну
+  (мають пріоритет над згенерованими з protocol.csv).
 
 Усі джерела перетворюються на три однакові таблиці: теми, питання, сценарії.
 """
@@ -30,9 +31,9 @@ SCENARIO_COLUMNS = ["topic_id", "node_id", "text", "option", "next_node",
 
 # Короткі коди для сценаріїв із protocol.csv
 PROTOCOL_TOPIC_IDS = {
-    "Зупинка кровообігу у дорослих": "arrest",
+    "Зупинка кровообігу у дорослих": "cpr",
     "Масивна зовнішня кровотеча": "bleeding",
-    "Опіки": "burn",
+    "Опіки": "burns",
     "Травма голови": "head",
     "Шок": "shock",
 }
@@ -44,8 +45,8 @@ WIDE_TOPICS = {
 
 
 def load_all(prefix: str, columns: list[str] | None = None) -> pd.DataFrame:
-    """Читає data/<prefix>.csv і всі data/<prefix>_*.csv, об'єднує в одну таблицю."""
-    files = sorted(DATA_DIR.glob(f"{prefix}.csv")) + sorted(DATA_DIR.glob(f"{prefix}_*.csv"))
+    """Читає всі файли data/<prefix>*.csv (topics.csv, topics_burns.csv...) і об'єднує."""
+    files = sorted(DATA_DIR.glob(f"{prefix}*.csv"))
     if not files:
         return pd.DataFrame(columns=columns or [])
     frames = [pd.read_csv(path, dtype=str).fillna("") for path in files]
@@ -166,24 +167,135 @@ def _generated_tables() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
                  for i in range(3))
 
 
+def _normalize_questions(questions: pd.DataFrame, topics: pd.DataFrame) -> pd.DataFrame:
+    """Виправляє поширені помилки у questions*.csv:
+    topic_id як номер (1, 2, 3...) -> код теми за порядком у topics*.csv;
+    correct як 1/2/3 -> a/b/c."""
+    if questions.empty:
+        return questions
+    questions = questions.copy()
+    order = {str(i): tid for i, tid in enumerate(topics["topic_id"], 1)}
+    questions["topic_id"] = questions["topic_id"].astype(str).str.strip().replace(order)
+    letters = {"1": "a", "2": "b", "3": "c"}
+    questions["correct"] = (questions["correct"].astype(str).str.strip().str.lower()
+                            .replace(letters))
+    return questions.apply(_shuffle_options, axis=1)
+
+
+def _shuffle_options(row: pd.Series) -> pd.Series:
+    """Переставляє варіанти, щоб правильна відповідь не стояла завжди на одному місці."""
+    keys = [k for k in "abc" if str(row.get(f"option_{k}", "")).strip()]
+    if len(keys) < 2 or row["correct"] not in keys:
+        return row
+    texts = [row[f"option_{k}"] for k in keys]
+    correct_text = row[f"option_{row['correct']}"]
+    shift = sum(map(ord, str(row["question"]))) % len(texts)
+    texts = texts[shift:] + texts[:shift]
+    row = row.copy()
+    for key, text in zip(keys, texts):
+        row[f"option_{key}"] = text
+    row["correct"] = keys[texts.index(correct_text)]
+    return row
+
+
+def _ok_path(scenarios: pd.DataFrame, topic_id: str) -> list[pd.DataFrame]:
+    """Кроки сценарію по правильному шляху: від <тема>_1 до END_OK."""
+    path, node, seen = [], f"{topic_id}_1", set()
+    while node not in END_NODES and node not in seen:
+        seen.add(node)
+        options = scenarios[scenarios["node_id"] == node]
+        ok = options[options["result"] == "ok"]
+        if options.empty or ok.empty:
+            break
+        path.append(options)
+        node = ok.iloc[0]["next_node"]
+    return path
+
+
+def _summary_from_scenarios(scenarios: pd.DataFrame, topic_id: str) -> str:
+    """Конспект = правильні дії по порядку."""
+    actions = [step[step["result"] == "ok"].iloc[0]["option"]
+               for step in _ok_path(scenarios, topic_id)]
+    return " ".join(f"{i}. {text}." for i, text in enumerate(actions, 1))
+
+
+def _extra_questions(scenarios: pd.DataFrame, topic_id: str, need: int) -> list[dict]:
+    """Додаткові питання з кроків сценарію, якщо в темі менше 3 питань."""
+    extra = []
+    for step in reversed(_ok_path(scenarios, topic_id)):
+        if len(extra) >= need:
+            break
+        ok = step[step["result"] == "ok"].iloc[0]
+        wrong = step[step["result"] != "ok"].head(2)
+        if wrong.empty:
+            continue
+        options = [(ok["option"], True)] + [(w, False) for w in wrong["option"]]
+        shift = len(extra) % len(options)
+        options = options[shift:] + options[:shift]
+        row = {"topic_id": topic_id, "question": ok["text"], "option_a": "",
+               "option_b": "", "option_c": "", "correct": "", "explain": ok["explain"]}
+        for key, (text, is_ok) in zip("abc", options):
+            row[f"option_{key}"] = text
+            if is_ok:
+                row["correct"] = key
+        extra.append(row)
+    return extra
+
+
 def load_topics() -> pd.DataFrame:
-    """Теми з конспектами (лише ті, для яких є сценарій)."""
+    """Теми з конспектами (лише ті, для яких є сценарій).
+
+    Назву й джерело беремо з ручного файлу, а конспект — найповніший
+    (зазвичай згенерований із правильних дій у protocol.csv).
+    """
     topics = pd.concat([load_all("topics", TOPIC_COLUMNS), _generated_tables()[0]],
                        ignore_index=True)
-    with_scenarios = set(load_scenarios()["topic_id"])
+    if topics.empty:
+        return topics
+    topics["summary_len"] = topics["summary"].str.len()
+    longest = topics.sort_values("summary_len").groupby("topic_id")["summary"].last()
+    topics = topics.drop_duplicates("topic_id").drop(columns="summary_len")
+    topics["summary"] = topics["topic_id"].map(longest)
+    scenarios = load_scenarios()
+    # Короткий опис (одне речення) замінюємо конспектом із правильних дій сценарію
+    for i, row in topics.iterrows():
+        if len(row["summary"]) < 150:
+            built = _summary_from_scenarios(scenarios, row["topic_id"])
+            if built:
+                topics.at[i, "summary"] = built
+    with_scenarios = set(scenarios["topic_id"])
     return topics[topics["topic_id"].isin(with_scenarios)].reset_index(drop=True)
 
 
 def load_questions() -> pd.DataFrame:
-    """Питання по конспекту (3 на тему)."""
-    return pd.concat([load_all("questions", QUESTION_COLUMNS), _generated_tables()[1]],
-                     ignore_index=True)
+    """Питання по конспекту (3 на тему). Ручні питання мають пріоритет."""
+    topics = load_all("topics", TOPIC_COLUMNS)
+    manual = _normalize_questions(load_all("questions", QUESTION_COLUMNS), topics)
+    generated = _generated_tables()[1]
+    if not generated.empty and not manual.empty:
+        generated = generated[~generated["topic_id"].isin(manual["topic_id"])]
+    questions = pd.concat([manual, generated], ignore_index=True)
+
+    # Якщо в темі менше 3 питань — доповнюємо питаннями з її сценарію
+    scenarios = load_scenarios()
+    extra = []
+    for topic_id in scenarios["topic_id"].unique():
+        have = int((questions["topic_id"] == topic_id).sum()) if not questions.empty else 0
+        if have < 3:
+            extra += _extra_questions(scenarios, topic_id, 3 - have)
+    if extra:
+        questions = pd.concat([questions, pd.DataFrame(extra)], ignore_index=True)
+    return questions
 
 
 def load_scenarios() -> pd.DataFrame:
     """Вузли сценаріїв: один рядок = один варіант відповіді."""
-    df = pd.concat([load_all("scenarios", SCENARIO_COLUMNS), _generated_tables()[2]],
-                   ignore_index=True)
+    manual = load_all("scenarios", SCENARIO_COLUMNS)
+    generated = _generated_tables()[2]
+    if not generated.empty and not manual.empty:
+        # Ручні сценарії (з розгалуженнями) мають пріоритет над згенерованими
+        generated = generated[~generated["topic_id"].isin(manual["topic_id"])]
+    df = pd.concat([manual, generated], ignore_index=True)
     if "time_limit" in df.columns:
         df["time_limit"] = pd.to_numeric(df["time_limit"], errors="coerce")
     return df
@@ -259,10 +371,9 @@ def check_files() -> list[str]:
     """Знаходить файли в data/, які програма не читає через неправильну назву."""
     if not DATA_DIR.exists():
         return [f"Папку data не знайдено: {DATA_DIR}"]
-    prefixes = ("topics_", "questions_", "scenarios_")
+    prefixes = ("topics", "questions", "scenarios")
     # Файли, які програма читає окремо (protocol.csv, choking.csv, дані AED)
     known = {PROTOCOL_FILE.name, "aed_kyiv.csv"} | {f"{t}.csv" for t in WIDE_TOPICS}
-    known |= {"topics.csv", "questions.csv", "scenarios.csv"}
     errors = []
     for path in sorted(DATA_DIR.iterdir()):
         if path.name.rstrip(".") in known:
