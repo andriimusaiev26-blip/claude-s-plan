@@ -148,6 +148,23 @@ div:has(> [data-testid="stAlertContentError"]) * { color: #FFFFFF !important; fo
 
 /* Смуга прогресу */
 [data-testid="stProgress"] > div > div > div > div { background: var(--red) !important; border-radius: 999px !important; }
+/* Колір тексту всередині заголовків (Streamlit обгортає текст у span) */
+h1, h1 *, [data-testid="stHeading"] h1 * { color: var(--red) !important; }
+h2 *, h3 * { color: var(--red) !important; }
+
+/* Кнопки на всю ширину */
+[data-testid="stButton"], .stButton { width: 100% !important; }
+[data-testid="stButton"] button, .stButton > button { width: 100% !important; }
+
+/* Бічна панель у тон фону */
+[data-testid="stSidebar"], [data-testid="stSidebar"] > div { background: #F4EADC !important; }
+[data-testid="stSidebarNav"] a[aria-current="page"], [data-testid="stSidebarNav"] a:hover {
+    background: var(--yellow) !important;
+    border-radius: 12px;
+}
+
+/* Ховаємо кнопку Deploy, щоб не заважала на демо */
+[data-testid="stAppDeployButton"], .stAppDeployButton, .stDeployButton { display: none !important; }
 </style>
 """
 
