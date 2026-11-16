@@ -7,7 +7,7 @@ import charts
 import data_loader
 import quiz
 
-st.set_page_config(page_title="Перші 10 секунд", page_icon="⛑")
+st.set_page_config(page_title="VibeAid", page_icon="⛑")
 
 import styles
 styles.apply()
@@ -47,7 +47,7 @@ def start_scenario() -> None:
 
 # 1. Вибір теми
 if state.stage == "choose":
-    st.title("Перші 10 секунд")
+    st.title("VibeAid")
     st.write("Тренажер домедичної допомоги за протоколами МОЗ.")
     title = st.selectbox("Оберіть тему", topics["title"])
     if st.button("Почати"):
