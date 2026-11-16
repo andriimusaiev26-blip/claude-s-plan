@@ -12,8 +12,8 @@ def plot_step_times(steps: list[dict]):
     times = []   
 
     
-    for s in steps:
-        names.append(str(s["node_id"]))
+    for i, s in enumerate(steps, 1):
+        names.append(str(i))
         times.append(s["time"])
 
     fig, ax = plt.subplots(figsize=(8, 4))
