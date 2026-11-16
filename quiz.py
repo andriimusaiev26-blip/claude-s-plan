@@ -22,7 +22,7 @@ def available_options(row: pd.Series) -> list[str]:
 
 def check_question(row: pd.Series, answer_key: str) -> bool:
     """Перевіряє відповідь a/b/c."""
-    return key == str(row.get("correct_answer", row.get("correct", ""))).strip().lower()
+    return key == str(row["correct_answer"]).strip().lower()
 
 
 def start_node(topic_id: str) -> str:
