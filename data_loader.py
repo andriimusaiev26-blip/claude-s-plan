@@ -88,9 +88,45 @@ def check_questions(df: pd.DataFrame) -> list[str]:
     return errors
 
 
+def check_topics(df: pd.DataFrame, scenarios: pd.DataFrame) -> list[str]:
+    """Перевіряє теми: є конспект і джерело, у кожного сценарію є тема."""
+    if df.empty:
+        return ["Теми не знайдено"]
+    missing = [col for col in TOPIC_COLUMNS if col not in df.columns]
+    if missing:
+        return [f"У темах немає стовпців: {', '.join(missing)}"]
+
+    errors = []
+    for _, row in df.iterrows():
+        if not row["summary"].strip():
+            errors.append(f"{row['topic_id']}: порожній конспект summary")
+        if not row["source"].strip():
+            errors.append(f"{row['topic_id']}: порожнє джерело source")
+    for topic_id in set(scenarios["topic_id"]) - set(df["topic_id"]):
+        errors.append(f"{topic_id}: є сценарій, але немає теми в topics_*.csv")
+    return errors
+
+
+def check_files() -> list[str]:
+    """Знаходить файли в data/, які програма не читає через неправильну назву."""
+    if not DATA_DIR.exists():
+        return [f"Папку data не знайдено: {DATA_DIR}"]
+    prefixes = ("topics_", "questions_", "scenarios_")
+    errors = []
+    for path in sorted(DATA_DIR.iterdir()):
+        if not (path.name.startswith(prefixes) and path.name.endswith(".csv")):
+            errors.append(f"{path.name}: файл не читається, назва має бути "
+                          "topics_/questions_/scenarios_<тема>.csv")
+    return errors
+
+
 def check_all() -> list[str]:
     """Перевіряє всі дані одразу."""
-    return check_scenarios(load_scenarios()) + check_questions(load_questions())
+    scenarios = load_scenarios()
+    return (check_files()
+            + check_topics(load_topics(), scenarios)
+            + check_scenarios(scenarios)
+            + check_questions(load_questions()))
 
 
 if __name__ == "__main__":
