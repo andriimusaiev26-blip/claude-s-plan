@@ -1,84 +1,40 @@
+"""Роль 2 (Андрій): логіка квізу — питання по конспекту і сценарій з розгалуженнями."""
+import pandas as pd
 
-import time
+OPTION_KEYS = ["a", "b", "c"]
 
 
-class Quiz:
-    def __init__(self, questions):
-        # Принимаем список вопросов или таблицу pandas
-        if hasattr(questions, "to_dict"):
-            questions = questions.to_dict(orient="records")
+def get_questions(questions: pd.DataFrame, topic_id: str) -> pd.DataFrame:
+    """Питання по конспекту для обраної теми."""
+    # TODO
+    pass
 
-        self.questions = list(questions)
-        self.current_step = 0
-        self.results = []
-        self.start_time = time.monotonic()
 
-    def get_question(self):
-        # Возвращаем текущий вопрос
-        if self.current_step < len(self.questions):
-            return self.questions[self.current_step]
-        return None
+def check_question(row: pd.Series, answer_key: str) -> bool:
+    """True, якщо обрано правильний варіант (a/b/c)."""
+    # TODO
+    pass
 
-    def check_answer(self, answer):
-        question = self.get_question()
 
-        if question is None:
-            return None
+def start_node(topic_id: str) -> str:
+    """Перший вузол сценарію теми, наприклад cpr_1."""
+    # TODO
+    pass
 
-        # Время, потраченное на ответ
-        elapsed = round(time.monotonic() - self.start_time, 2)
-        time_limit = float(question.get("time_limit", 20))
 
-        # Проверяем ответ и время
-        correct = (
-            str(answer).strip().upper()
-            == str(question["correct_answer"]).strip().upper()
-        )
-        late = elapsed > time_limit
+def get_node(scenarios: pd.DataFrame, node_id: str) -> pd.DataFrame:
+    """Усі варіанти відповіді для вузла."""
+    # TODO
+    pass
 
-        # Критическая ошибка задаётся в CSV
-        critical = (
-            str(question.get("critical_on_error", "false")).lower()
-            in ("true", "1", "yes")
-            and not correct
-        )
 
-        result = {
-            "step": self.current_step + 1,
-            "correct": correct and not late,
-            "mistake": not correct or late,
-            "critical": critical,
-            "time": elapsed,
-            "late": late
-        }
+def choose(option_row: pd.Series, elapsed: float) -> dict:
+    """Обробляє вибір: результат, наступний вузол, пояснення, витрачені секунди."""
+    # TODO
+    pass
 
-        self.results.append(result)
-        self.current_step += 1
 
-        # Запускаем таймер следующего вопроса
-        self.start_time = time.monotonic()
-
-        return result
-
-    def is_finished(self):
-        return self.current_step >= len(self.questions)
-
-    def get_summary(self):
-        if not self.results:
-            return None
-
-        slowest = max(
-            self.results,
-            key=lambda result: result["time"]
-        )
-
-        return {
-            "steps": len(self.results),
-            "correct": sum(r["correct"] for r in self.results),
-            "mistakes": sum(r["mistake"] for r in self.results),
-            "critical_mistakes": sum(r["critical"] for r in self.results),
-            "total_time": round(
-                sum(r["time"] for r in self.results), 2
-            ),
-            "slowest_step": slowest["step"]
-        }
+def score(steps: list[dict]) -> dict:
+    """Підсумок сценарію: кроки, помилки, загальний час, найповільніший крок."""
+    # TODO
+    pass
