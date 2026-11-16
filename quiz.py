@@ -1,73 +1,88 @@
-"""Роль 2 (Андрій): логіка квізу та навчального сценарію.
 
-Формат сценарію: один рядок = один варіант відповіді
-(topic_id, node_id, text, option, next_node, result, explain, time_limit).
-Тут немає медичних рішень: правильні відповіді беруться з CSV.
+"""Логіка квізу: питання, переходи між вузлами, таймер та результати.
+
+Формат сценаріїв: topic_id,node_id,text,option,next_node,result,explain,time_limit.
 """
 import pandas as pd
 
-OPTION_KEYS = ["a", "b", "c"]
+OPTION_KEYS = ("a", "b", "c")
 
 
 def get_questions(questions: pd.DataFrame, topic_id: str) -> pd.DataFrame:
-    """Повертає питання обраної теми (три)."""
-    result = questions[questions["topic_id"].astype(str) == str(topic_id)]
-    return result.head(3).reset_index(drop=True)
+    """Повертає до трьох питань з обраної теми."""
+    return questions.loc[
+        questions["topic_id"].astype(str).str.strip() == str(topic_id).strip()
+    ].head(3).reset_index(drop=True)
 
 
 def available_options(row: pd.Series) -> list[str]:
-    """Ключі a/b/c, для яких у питанні є текст варіанта."""
-    return [key for key in OPTION_KEYS if str(row.get(f"option_{key}", "")).strip()]
+    """Показує лише непорожні варіанти a/b/c."""
+    return [
+        key for key in OPTION_KEYS
+        if pd.notna(row.get(f"option_{key}"))
+        and str(row.get(f"option_{key}")).strip()
+    ]
 
 
 def check_question(row: pd.Series, answer_key: str) -> bool:
-    """Перевіряє відповідь a/b/c."""
-    return key == str(row["correct_answer"]).strip().lower()
+    """Підтримує правильну відповідь як літеру a/b/c або число 1/2/3."""
+    answer = str(answer_key).strip().lower()
+    correct = str(row.get("correct_answer", row.get("correct", ""))).strip().lower()
+    correct = {"1": "a", "2": "b", "3": "c"}.get(correct, correct)
+    return answer in OPTION_KEYS and answer == correct
 
 
 def start_node(topic_id: str) -> str:
-    """Перший вузол сценарію, наприклад choking_1."""
+    """Перший вузол сценарію."""
     return f"{str(topic_id).strip()}_1"
 
 
 def get_node(scenarios: pd.DataFrame, node_id: str) -> pd.DataFrame:
-    """Усі варіанти відповіді для вузла."""
-    return scenarios[scenarios["node_id"] == node_id].reset_index(drop=True)
+    """Рядки-відповіді для обраного вузла з колонки node_id."""
+    if "node_id" not in scenarios.columns:
+        raise ValueError("У сценаріях немає колонки node_id")
+    options = scenarios.loc[
+        scenarios["node_id"].astype(str) == str(node_id)
+    ].reset_index(drop=True)
+    if options.empty:
+        raise ValueError(f"Немає варіантів для сценарію {node_id}")
+    return options
 
 
 def choose(option_row: pd.Series, elapsed: float) -> dict:
-    """Оцінює вибір і час. Правильна відповідь із запізненням — це «late»."""
-    elapsed = max(0.0, float(elapsed))
-    limit = option_row["time_limit"]
-    limit = float(limit) if pd.notna(limit) else 15.0
-    too_late = elapsed > limit
-
-    result = option_row["result"]
-    if too_late and result == "ok":
+    """Оцінка відповіді та часу, перехід до наступного вузла."""
+    seconds = max(0.0, float(elapsed))
+    limit = pd.to_numeric(option_row.get("time_limit", 15), errors="coerce")
+    if pd.isna(limit) or limit <= 0:
+        limit = 15.0
+    result = str(option_row.get("result", "mistake")).strip().lower()
+    if result == "ok" and seconds > float(limit):
         result = "late"
-
-    explain = option_row["explain"]
-    if not explain and too_late:
+    explain = option_row.get("explain", "")
+    if pd.isna(explain):
+        explain = ""
+    explain = str(explain)
+    if result == "late" and not explain:
         explain = f"Правильно, але ви не вклалися в {int(limit)} с."
     return {
         "node_id": option_row["node_id"],
         "result": result,
         "next_node": option_row["next_node"],
         "explain": explain,
-        "seconds": round(elapsed, 1),
-        "time": round(elapsed, 1),  # цей ключ використовує charts.py
+        "seconds": round(seconds, 1),
+        "time": round(seconds, 1),
     }
 
 
 def score(steps: list[dict]) -> dict:
-    """Підсумок: кроки, помилки, загальний час і найповільніший крок."""
+    """Кількість кроків, помилок, загальний час, найповільніший крок."""
     if not steps:
         return {"steps": 0, "mistakes": 0, "total_time": 0.0, "slowest": None}
-    log = pd.DataFrame(steps)
-    slowest = int(log["seconds"].idxmax())
+    slowest_index = max(range(len(steps)), key=lambda i: float(steps[i]["seconds"]))
+    seconds = float(steps[slowest_index]["seconds"])
     return {
-        "steps": len(log),
-        "mistakes": int((log["result"] != "ok").sum()),
-        "total_time": float(round(log["seconds"].sum(), 1)),
-        "slowest": f"крок {slowest + 1} ({log.loc[slowest, 'seconds']} с)",
+        "steps": len(steps),
+        "mistakes": sum(s.get("result") != "ok" for s in steps),
+        "total_time": round(sum(float(s["seconds"]) for s in steps), 1),
+        "slowest": f"крок {slowest_index + 1} ({seconds:.1f} с)",
     }
