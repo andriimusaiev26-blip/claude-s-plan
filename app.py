@@ -9,6 +9,9 @@ import quiz
 
 st.set_page_config(page_title="Перші 10 секунд", page_icon="⛑")
 
+import styles
+styles.apply()
+
 topics = data_loader.load_topics()
 questions = data_loader.load_questions()
 scenarios = data_loader.load_scenarios()
