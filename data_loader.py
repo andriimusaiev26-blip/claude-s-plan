@@ -44,8 +44,8 @@ WIDE_TOPICS = {
 
 
 def load_all(prefix: str, columns: list[str] | None = None) -> pd.DataFrame:
-    """Читає всі файли data/<prefix>_*.csv і об'єднує в одну таблицю."""
-    files = sorted(DATA_DIR.glob(f"{prefix}_*.csv"))
+    """Читає data/<prefix>.csv і всі data/<prefix>_*.csv, об'єднує в одну таблицю."""
+    files = sorted(DATA_DIR.glob(f"{prefix}.csv")) + sorted(DATA_DIR.glob(f"{prefix}_*.csv"))
     if not files:
         return pd.DataFrame(columns=columns or [])
     frames = [pd.read_csv(path, dtype=str).fillna("") for path in files]
@@ -262,6 +262,7 @@ def check_files() -> list[str]:
     prefixes = ("topics_", "questions_", "scenarios_")
     # Файли, які програма читає окремо (protocol.csv, choking.csv, дані AED)
     known = {PROTOCOL_FILE.name, "aed_kyiv.csv"} | {f"{t}.csv" for t in WIDE_TOPICS}
+    known |= {"topics.csv", "questions.csv", "scenarios.csv"}
     errors = []
     for path in sorted(DATA_DIR.iterdir()):
         if path.name.rstrip(".") in known:
